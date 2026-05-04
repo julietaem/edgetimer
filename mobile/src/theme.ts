@@ -1,5 +1,6 @@
 export const colors = {
   gold: '#BF925A',
+  primary: '#BF925A',
   lightGold: '#DDAB6C',
   darkGold: '#A67D49',
   background: '#F6F6F6',

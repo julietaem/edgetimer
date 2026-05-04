@@ -43,12 +43,26 @@ export default function App() {
 
   const handleLoginSuccess = (nextProfile: SessionProfile) => {
     setProfile(nextProfile);
+    setRole(nextProfile.role);
     setFeedback('');
     setScreen('home');
   };
 
+  const handleLogout = () => {
+    setProfile(null);
+    setFeedback('');
+    setRole('cliente');
+    setScreen('role');
+  };
+
   if (screen === 'home') {
-    return <HomeScreen />;
+    return (
+      <HomeScreen
+        profile={profile}
+        role={profile?.role ?? role}
+        onLogout={handleLogout}
+      />
+    );
   }
 
   return (
