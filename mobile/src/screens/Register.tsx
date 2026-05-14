@@ -9,6 +9,7 @@ import {
   keyIcon,
   PrimaryButton,
   userIcon,
+  phoneIcon,
 } from '../components/FormControls';
 import { readError } from '../utils/errors';
 
@@ -67,6 +68,7 @@ export function RegisterScreen({
         keyboardType="email-address"
       />
       <Input
+        icon={phoneIcon}
         placeholder="Teléfono"
         value={telefono}
         onChangeText={setTelefono}

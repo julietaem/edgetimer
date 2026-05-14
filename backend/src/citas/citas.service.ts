@@ -1,189 +1,638 @@
 import {
   BadRequestException,
+  ForbiddenException,
   Injectable,
   InternalServerErrorException,
+  NotFoundException,
 } from '@nestjs/common';
-import { supabaseAdmin } from '../supabase';
-import type { CreateCitaDto } from './citas.types';
+import { createSupabaseUserClient, supabaseAdmin } from '../supabase';
+import type {
+  CalificarCitaDto,
+  CitaActionDto,
+  CreateSlotDto,
+  CreateSolicitudDto,
+  EstadoCita,
+  ListCitasQuery,
+  ReprogramCitaDto,
+  ReserveSlotDto,
+  UpdateSlotDto,
+} from './citas.types';
 
-interface ClienteRow {
-  id_cliente: string;
-  nombre_cliente: string;
-  usuario: string;
-}
-
-interface BarberoRow {
-  id_barbero: string;
-  nombre_barbero: string;
-}
+const TIME_ZONE_OFFSET = '-05:00';
+const MIN_SLOT_MINUTES = 15;
 
 @Injectable()
 export class CitasService {
-  async list(role: string, profileId: string) {
-    if (!profileId) {
-      throw new BadRequestException('Falta el perfil');
-    }
+  async list(query: ListCitasQuery) {
+    this.requireText(query.profileId, 'Falta el perfil');
+    const column = query.role === 'barbero' ? 'id_barbero' : 'id_cliente';
 
-    const column = role === 'barbero' ? 'id_barbero' : 'id_cliente';
-    const { data, error } = await supabaseAdmin
+    let request = supabaseAdmin
       .from('cita')
       .select(
         `
           id_cita,
+          id_cliente,
+          id_barbero,
+          id_slot,
           inicio_at,
           fin_at,
           estado,
           notas_cliente,
-          cliente:cliente(nombre_cliente),
-          barbero:barbero(nombre_barbero)
+          cliente:cliente(id_cliente, nombre_cliente, foto_perfil),
+          barbero:barbero(id_barbero, nombre_barbero, foto_perfil, promedio_calificacion),
+          cita_procedimiento(
+            procedimiento:procedimiento(id_procedimiento, nombre, precio, duracion_minutos)
+          ),
+          calificacion(puntuacion_numerica, resena)
         `,
       )
-      .eq(column, profileId)
+      .eq(column, query.profileId)
       .order('inicio_at', { ascending: true });
+
+    if (query.estado) {
+      request = request.eq('estado', query.estado);
+    }
+
+    const { data, error } = await request;
 
     if (error) {
       throw new InternalServerErrorException(error.message);
     }
 
-    return (data || []).map((cita: any) => ({
-      id: cita.id_cita,
-      cliente: cita.cliente?.nombre_cliente || 'Cliente',
-      barbero: cita.barbero?.nombre_barbero || 'Barbero',
-      servicio: cita.notas_cliente || '',
-      fecha: this.formatDate(cita.inicio_at),
-      hora: this.formatHour(cita.inicio_at),
-      estado: cita.estado,
-    }));
+    return (data || []).map((cita: any) => this.mapCita(cita));
   }
 
-  async create(dto: CreateCitaDto) {
-    const barbero = await this.findBarbero(dto.barbero);
-    const cliente =
-      dto.role === 'cliente'
-        ? { id_cliente: dto.profileId }
-        : await this.findCliente(dto.cliente);
-    const inicioAt = this.toDate(dto.fecha, dto.hora);
-    const finAt = new Date(inicioAt.getTime() + 60 * 60 * 1000);
+  async listSlots(profileId?: string) {
+    let request = supabaseAdmin
+      .from('slot_cita')
+      .select(
+        `
+          id_slot,
+          id_barbero,
+          inicio_at,
+          fin_at,
+          estado,
+          barbero:barbero(id_barbero, nombre_barbero, foto_perfil, promedio_calificacion)
+        `,
+      )
+      .eq('estado', 'pendiente')
+      .gte('inicio_at', new Date().toISOString())
+      .order('inicio_at', { ascending: true });
 
-    const { data: slot, error: slotError } = await supabaseAdmin
+    if (profileId) {
+      request = request.eq('id_barbero', profileId);
+    }
+
+    const { data, error } = await request;
+
+    if (error) {
+      throw new InternalServerErrorException(error.message);
+    }
+
+    return (data || []).map((slot: any) => this.mapSlot(slot));
+  }
+
+  async createSlot(dto: CreateSlotDto) {
+    const profileId = this.requireText(dto.profileId, 'Falta el perfil');
+    const inicioAt = this.toDate(dto.fecha, dto.horaInicio);
+    const finAt = this.toDate(dto.fecha, dto.horaFin);
+    this.validateRange(inicioAt, finAt);
+
+    const { data, error } = await supabaseAdmin
       .from('slot_cita')
       .insert({
-        id_barbero: barbero.id_barbero,
+        id_barbero: profileId,
         inicio_at: inicioAt.toISOString(),
         fin_at: finAt.toISOString(),
-        estado: 'disponible',
+        estado: 'pendiente',
       })
-      .select('id_slot')
+      .select(
+        `
+          id_slot,
+          id_barbero,
+          inicio_at,
+          fin_at,
+          estado,
+          barbero:barbero(id_barbero, nombre_barbero, foto_perfil, promedio_calificacion)
+        `,
+      )
       .single();
 
-    if (slotError) {
-      throw new InternalServerErrorException(slotError.message);
+    if (error) {
+      this.throwSupabaseError(error.message);
+    }
+
+    return {
+      message: 'Horario disponible creado exitosamente.',
+      slot: this.mapSlot(data),
+    };
+  }
+
+  async updateSlot(slotId: string, dto: UpdateSlotDto) {
+    const current = await this.findSlot(slotId);
+    this.ensureOwner(current.id_barbero, dto.profileId);
+
+    if (current.estado !== 'pendiente') {
+      throw new BadRequestException('Solo puedes editar horarios pendientes.');
+    }
+
+    const inicioAt = this.toDate(dto.fecha, dto.horaInicio);
+    const finAt = this.toDate(dto.fecha, dto.horaFin);
+    this.validateRange(inicioAt, finAt);
+
+    const { data, error } = await supabaseAdmin
+      .from('slot_cita')
+      .update({
+        inicio_at: inicioAt.toISOString(),
+        fin_at: finAt.toISOString(),
+      })
+      .eq('id_slot', slotId)
+      .select(
+        `
+          id_slot,
+          id_barbero,
+          inicio_at,
+          fin_at,
+          estado,
+          barbero:barbero(id_barbero, nombre_barbero, foto_perfil, promedio_calificacion)
+        `,
+      )
+      .single();
+
+    if (error) {
+      this.throwSupabaseError(error.message);
+    }
+
+    return {
+      message: 'Horario actualizado.',
+      slot: this.mapSlot(data),
+    };
+  }
+
+  async deleteSlot(slotId: string, profileId: string) {
+    const current = await this.findSlot(slotId);
+    this.ensureOwner(current.id_barbero, profileId);
+
+    if (current.estado !== 'pendiente') {
+      throw new BadRequestException('Solo puedes eliminar horarios pendientes.');
+    }
+
+    const { error } = await supabaseAdmin
+      .from('slot_cita')
+      .update({ estado: 'cancelado' })
+      .eq('id_slot', slotId);
+
+    if (error) {
+      throw new InternalServerErrorException(error.message);
+    }
+
+    return { message: 'Horario eliminado.' };
+  }
+
+  async solicitar(dto: CreateSolicitudDto) {
+    const profileId = this.requireText(dto.profileId, 'Falta el perfil');
+    const procedimientoIds = this.requireIds(dto.procedimientoIds);
+    const procedimientos = await this.findProcedimientos(procedimientoIds);
+    const inicioAt = this.toDate(dto.fecha, dto.horaInicio);
+    const finAt = this.addMinutes(
+      inicioAt,
+      procedimientos.reduce((total, item) => total + item.duracion_minutos, 0),
+    );
+
+    const { data, error } = await supabaseAdmin
+      .from('cita')
+      .insert({
+        id_cliente: profileId,
+        id_barbero: this.requireText(dto.idBarbero, 'Selecciona un barbero'),
+        inicio_at: inicioAt.toISOString(),
+        fin_at: finAt.toISOString(),
+        estado: 'pendiente',
+        notas_cliente: dto.notas || null,
+      })
+      .select('id_cita')
+      .single();
+
+    if (error) {
+      this.throwSupabaseError(error.message);
+    }
+
+    await this.insertProcedimientos(data.id_cita, procedimientoIds);
+
+    return {
+      message: 'Solicitud enviada. Espera la confirmacion del barbero.',
+      cita: await this.findCita(data.id_cita),
+    };
+  }
+
+  async reservar(dto: ReserveSlotDto) {
+    const profileId = this.requireText(dto.profileId, 'Falta el perfil');
+    const procedimientoIds = this.requireIds(dto.procedimientoIds);
+    const slot = await this.findSlot(dto.slotId);
+
+    if (slot.estado !== 'pendiente') {
+      throw new BadRequestException('El horario seleccionado no esta disponible.');
     }
 
     const { data, error } = await supabaseAdmin
       .from('cita')
       .insert({
-        id_cliente: cliente.id_cliente,
-        id_barbero: barbero.id_barbero,
+        id_cliente: profileId,
+        id_barbero: slot.id_barbero,
         id_slot: slot.id_slot,
-        inicio_at: inicioAt.toISOString(),
-        fin_at: finAt.toISOString(),
-        estado: 'pendiente',
-        notas_cliente: dto.servicio || null,
+        inicio_at: slot.inicio_at,
+        fin_at: slot.fin_at,
+        estado: 'confirmada',
+        notas_cliente: dto.notas || null,
       })
       .select('id_cita')
       .single();
+
+    if (error) {
+      this.throwSupabaseError(error.message);
+    }
+
+    await this.insertProcedimientos(data.id_cita, procedimientoIds);
+
+    return {
+      message: 'Cita reservada exitosamente.',
+      cita: await this.findCita(data.id_cita),
+    };
+  }
+
+  async accept(citaId: string, dto: CitaActionDto, authorization?: string) {
+    const cita = await this.findCitaRaw(citaId);
+    this.ensureOwner(cita.id_barbero, dto.profileId);
+
+    if (cita.estado !== 'pendiente') {
+      throw new BadRequestException('Solo puedes aceptar solicitudes pendientes.');
+    }
+
+    return this.updateEstado(citaId, 'confirmada', 'Solicitud aceptada.', authorization);
+  }
+
+  async reject(citaId: string, dto: CitaActionDto, authorization?: string) {
+    const cita = await this.findCitaRaw(citaId);
+    this.ensureOwner(cita.id_barbero, dto.profileId);
+
+    if (cita.estado !== 'pendiente') {
+      throw new BadRequestException('Solo puedes rechazar solicitudes pendientes.');
+    }
+
+    return this.updateEstado(citaId, 'rechazada', 'Solicitud rechazada.', authorization);
+  }
+
+  async cancel(citaId: string, dto: CitaActionDto) {
+    const cita = await this.findCitaRaw(citaId);
+    const ownerId = dto.role === 'barbero' ? cita.id_barbero : cita.id_cliente;
+    this.ensureOwner(ownerId, dto.profileId);
+    this.ensureCanModify(cita.inicio_at);
+
+    return this.updateEstado(citaId, 'cancelada', 'Cita cancelada.');
+  }
+
+  async reprogram(citaId: string, dto: ReprogramCitaDto) {
+    const cita = await this.findCitaRaw(citaId);
+    const ownerId = dto.role === 'barbero' ? cita.id_barbero : cita.id_cliente;
+    this.ensureOwner(ownerId, dto.profileId);
+    this.ensureCanModify(cita.inicio_at);
+
+    const inicioAt = this.toDate(dto.fecha, dto.horaInicio);
+    const finAt = this.toDate(dto.fecha, dto.horaFin);
+    this.validateRange(inicioAt, finAt);
+
+    const { data, error } = await supabaseAdmin
+      .from('cita')
+      .update({
+        inicio_at: inicioAt.toISOString(),
+        fin_at: finAt.toISOString(),
+      })
+      .eq('id_cita', citaId)
+      .select(
+        `
+          id_cita,
+          id_cliente,
+          id_barbero,
+          id_slot,
+          inicio_at,
+          fin_at,
+          estado,
+          notas_cliente,
+          cliente:cliente(id_cliente, nombre_cliente, foto_perfil),
+          barbero:barbero(id_barbero, nombre_barbero, foto_perfil, promedio_calificacion),
+          cita_procedimiento(
+            procedimiento:procedimiento(id_procedimiento, nombre, precio, duracion_minutos)
+          ),
+          calificacion(puntuacion_numerica, resena)
+        `,
+      )
+      .single();
+
+    if (error) {
+      this.throwSupabaseError(error.message);
+    }
+
+    return {
+      message: 'Cita reprogramada.',
+      cita: this.mapCita(data),
+    };
+  }
+
+  async calificar(citaId: string, dto: CalificarCitaDto) {
+    const cita = await this.findCitaRaw(citaId);
+    this.ensureOwner(cita.id_cliente, dto.profileId);
+
+    const puntuacion = Number(dto.puntuacion);
+    if (!Number.isInteger(puntuacion) || puntuacion < 1 || puntuacion > 5) {
+      throw new BadRequestException('La calificacion debe estar entre 1 y 5.');
+    }
+
+    if (cita.estado !== 'realizada') {
+      throw new BadRequestException('Solo puedes calificar una cita realizada.');
+    }
+
+    const { error } = await supabaseAdmin
+      .from('calificacion')
+      .upsert(
+        {
+          id_cita: citaId,
+          puntuacion_numerica: puntuacion,
+          resena: dto.resena || null,
+        },
+        { onConflict: 'id_cita' },
+      );
 
     if (error) {
       throw new InternalServerErrorException(error.message);
     }
 
     return {
-      message: 'Cita guardada',
-      id: data.id_cita,
-      cita: {
-        id: data.id_cita,
-        cliente: dto.cliente,
-        barbero: dto.barbero,
-        servicio: dto.servicio || '',
-        fecha: dto.fecha,
-        hora: dto.hora,
-        estado: 'pendiente',
-      },
+      message: 'Calificacion guardada.',
+      cita: await this.findCita(citaId),
     };
   }
 
-  private async findBarbero(nombre: string): Promise<BarberoRow> {
-    const cleanName = this.requireText(nombre, 'Selecciona un barbero');
-    const { data, error } = await supabaseAdmin
-      .from('barbero')
-      .select('id_barbero, nombre_barbero')
-      .ilike('nombre_barbero', cleanName)
-      .maybeSingle();
+  private async updateEstado(
+    citaId: string,
+    estado: EstadoCita,
+    message: string,
+    authorization?: string,
+  ) {
+    const client = this.getActionClient(authorization);
+    const { data, error } = await client
+      .from('cita')
+      .update({ estado })
+      .eq('id_cita', citaId)
+      .select(
+        `
+          id_cita,
+          id_cliente,
+          id_barbero,
+          id_slot,
+          inicio_at,
+          fin_at,
+          estado,
+          notas_cliente,
+          cliente:cliente(id_cliente, nombre_cliente, foto_perfil),
+          barbero:barbero(id_barbero, nombre_barbero, foto_perfil, promedio_calificacion),
+          cita_procedimiento(
+            procedimiento:procedimiento(id_procedimiento, nombre, precio, duracion_minutos)
+          ),
+          calificacion(puntuacion_numerica, resena)
+        `,
+      )
+      .single();
 
     if (error) {
-      throw new InternalServerErrorException(error.message);
+      this.throwSupabaseError(error.message);
     }
 
-    if (!data) {
-      throw new BadRequestException('No se encontro el barbero seleccionado');
-    }
-
-    return data as BarberoRow;
+    return {
+      message,
+      cita: this.mapCita(data),
+    };
   }
 
-  private async findCliente(value: string): Promise<ClienteRow> {
-    const cleanValue = this.requireText(value, 'Escribe el cliente');
+  private async findCita(citaId: string) {
     const { data, error } = await supabaseAdmin
-      .from('cliente')
-      .select('id_cliente, nombre_cliente, usuario')
-      .or(
-        `nombre_cliente.ilike.${cleanValue},usuario.ilike.${cleanValue},email.ilike.${cleanValue}`,
+      .from('cita')
+      .select(
+        `
+          id_cita,
+          id_cliente,
+          id_barbero,
+          id_slot,
+          inicio_at,
+          fin_at,
+          estado,
+          notas_cliente,
+          cliente:cliente(id_cliente, nombre_cliente, foto_perfil),
+          barbero:barbero(id_barbero, nombre_barbero, foto_perfil, promedio_calificacion),
+          cita_procedimiento(
+            procedimiento:procedimiento(id_procedimiento, nombre, precio, duracion_minutos)
+          ),
+          calificacion(puntuacion_numerica, resena)
+        `,
       )
-      .maybeSingle();
+      .eq('id_cita', citaId)
+      .single();
 
     if (error) {
       throw new InternalServerErrorException(error.message);
     }
 
-    if (!data) {
-      throw new BadRequestException(
-        'No se encontro el cliente. Escribe su nombre, usuario o email exacto.',
-      );
+    return this.mapCita(data);
+  }
+
+  private async findCitaRaw(citaId: string) {
+    const { data, error } = await supabaseAdmin
+      .from('cita')
+      .select('id_cita, id_cliente, id_barbero, inicio_at, fin_at, estado')
+      .eq('id_cita', citaId)
+      .single();
+
+    if (error || !data) {
+      throw new NotFoundException('No se encontro la cita.');
     }
 
-    return data as ClienteRow;
+    return data as any;
+  }
+
+  private async findSlot(slotId: string) {
+    const { data, error } = await supabaseAdmin
+      .from('slot_cita')
+      .select('id_slot, id_barbero, inicio_at, fin_at, estado')
+      .eq('id_slot', slotId)
+      .single();
+
+    if (error || !data) {
+      throw new NotFoundException('No se encontro el horario.');
+    }
+
+    return data as any;
+  }
+
+  private async findProcedimientos(ids: string[]) {
+    const { data, error } = await supabaseAdmin
+      .from('procedimiento')
+      .select('id_procedimiento, duracion_minutos')
+      .in('id_procedimiento', ids)
+      .eq('activo', true);
+
+    if (error) {
+      throw new InternalServerErrorException(error.message);
+    }
+
+    if (!data || data.length !== ids.length) {
+      throw new BadRequestException('Selecciona procedimientos validos.');
+    }
+
+    return data as { id_procedimiento: string; duracion_minutos: number }[];
+  }
+
+  private async insertProcedimientos(citaId: string, procedimientoIds: string[]) {
+    const { error } = await supabaseAdmin.from('cita_procedimiento').insert(
+      procedimientoIds.map((id) => ({
+        id_cita: citaId,
+        id_procedimiento: id,
+      })),
+    );
+
+    if (error) {
+      throw new InternalServerErrorException(error.message);
+    }
+  }
+
+  private mapCita(cita: any) {
+    const procedimientos = (cita.cita_procedimiento || [])
+      .map((item: any) => item.procedimiento)
+      .filter(Boolean);
+    const total = procedimientos.reduce(
+      (sum: number, item: any) => sum + Number(item.precio || 0),
+      0,
+    );
+    const calificacion = Array.isArray(cita.calificacion)
+      ? cita.calificacion[0]
+      : cita.calificacion;
+
+    return {
+      id: cita.id_cita,
+      cliente: {
+        id: cita.id_cliente,
+        nombre: cita.cliente?.nombre_cliente || 'Cliente',
+        foto: cita.cliente?.foto_perfil || null,
+      },
+      barbero: {
+        id: cita.id_barbero,
+        nombre: cita.barbero?.nombre_barbero || 'Barbero',
+        foto: cita.barbero?.foto_perfil || null,
+        promedioCalificacion: Number(cita.barbero?.promedio_calificacion || 0),
+      },
+      slotId: cita.id_slot,
+      procedimientos: procedimientos.map((item: any) => ({
+        id: item.id_procedimiento,
+        nombre: item.nombre,
+        precio: Number(item.precio || 0),
+        duracionMinutos: item.duracion_minutos,
+      })),
+      costoTotal: total,
+      inicioAt: cita.inicio_at,
+      finAt: cita.fin_at,
+      fecha: this.formatDate(cita.inicio_at),
+      horaInicio: this.formatHour(cita.inicio_at),
+      horaFin: this.formatHour(cita.fin_at),
+      estado: cita.estado,
+      estadoLabel: this.estadoLabel(cita.estado),
+      notas: cita.notas_cliente || '',
+      puedeModificar: this.canModify(cita.inicio_at),
+      calificacion: calificacion
+        ? {
+            puntuacion: calificacion.puntuacion_numerica,
+            resena: calificacion.resena || '',
+          }
+        : null,
+    };
+  }
+
+  private mapSlot(slot: any) {
+    return {
+      id: slot.id_slot,
+      barbero: {
+        id: slot.id_barbero,
+        nombre: slot.barbero?.nombre_barbero || 'Barbero',
+        foto: slot.barbero?.foto_perfil || null,
+        promedioCalificacion: Number(slot.barbero?.promedio_calificacion || 0),
+      },
+      inicioAt: slot.inicio_at,
+      finAt: slot.fin_at,
+      fecha: this.formatDate(slot.inicio_at),
+      horaInicio: this.formatHour(slot.inicio_at),
+      horaFin: this.formatHour(slot.fin_at),
+      estado: slot.estado,
+    };
   }
 
   private toDate(fecha: string, hora: string) {
-    const cleanFecha = this.requireText(fecha, 'Escribe la fecha');
+    const cleanFecha = this.requireText(fecha, 'Selecciona la fecha');
     const cleanHora = this.requireText(hora, 'Selecciona la hora');
-    const hourMatch = cleanHora.match(/^(\d{1,2}):00 (AM|PM)$/);
 
-    if (!/^\d{4}-\d{2}-\d{2}$/.test(cleanFecha) || !hourMatch) {
-      throw new BadRequestException('Fecha u hora invalida');
+    if (!/^\d{4}-\d{2}-\d{2}$/.test(cleanFecha)) {
+      throw new BadRequestException('Fecha invalida.');
     }
 
-    let hour = Number(hourMatch[1]);
-    const meridian = hourMatch[2];
+    const timeMatch = cleanHora.match(/^(\d{2}):(\d{2})$/);
+    if (!timeMatch) {
+      throw new BadRequestException('Hora invalida.');
+    }
 
-    if (meridian === 'PM' && hour !== 12) hour += 12;
-    if (meridian === 'AM' && hour === 12) hour = 0;
+    const date = new Date(`${cleanFecha}T${cleanHora}:00${TIME_ZONE_OFFSET}`);
+    const day = date.getUTCDay();
+    if (day === 0 || day === 6) {
+      throw new BadRequestException('Solo se permiten horarios de lunes a viernes.');
+    }
 
-    return new Date(`${cleanFecha}T${String(hour).padStart(2, '0')}:00:00-05:00`);
+    return date;
   }
 
-  private formatDate(value: string) {
-    return new Date(value).toISOString().slice(0, 10);
+  private validateRange(inicioAt: Date, finAt: Date) {
+    if (finAt <= inicioAt) {
+      throw new BadRequestException('La hora de fin debe ser posterior a la hora de inicio.');
+    }
+
+    const minutes = (finAt.getTime() - inicioAt.getTime()) / 60000;
+    if (minutes < MIN_SLOT_MINUTES) {
+      throw new BadRequestException('El horario debe durar al menos 15 minutos.');
+    }
   }
 
-  private formatHour(value: string) {
-    return new Date(value).toLocaleTimeString('en-US', {
-      hour: 'numeric',
-      minute: '2-digit',
-      hour12: true,
-      timeZone: 'America/Bogota',
-    });
+  private addMinutes(date: Date, minutes: number) {
+    return new Date(date.getTime() + minutes * 60000);
+  }
+
+  private ensureOwner(ownerId: string, profileId: string) {
+    if (ownerId !== profileId) {
+      throw new ForbiddenException('No tienes permisos para esta accion.');
+    }
+  }
+
+  private ensureCanModify(inicioAt: string) {
+    if (!this.canModify(inicioAt)) {
+      throw new BadRequestException(
+        'Solo puedes modificar citas con al menos 1 dia de antelacion.',
+      );
+    }
+  }
+
+  private canModify(inicioAt: string) {
+    return new Date(inicioAt).getTime() - Date.now() >= 24 * 60 * 60 * 1000;
+  }
+
+  private requireIds(ids: string[] | undefined) {
+    if (!ids || ids.length === 0) {
+      throw new BadRequestException('Selecciona al menos un procedimiento.');
+    }
+
+    return ids;
   }
 
   private requireText(value: string | undefined, message: string) {
@@ -192,5 +641,66 @@ export class CitasService {
     }
 
     return value.trim();
+  }
+
+  private formatDate(value: string) {
+    return new Date(value).toLocaleDateString('en-CA', {
+      timeZone: 'America/Bogota',
+    });
+  }
+
+  private formatHour(value: string) {
+    return new Date(value).toLocaleTimeString('en-GB', {
+      hour: '2-digit',
+      minute: '2-digit',
+      hour12: false,
+      timeZone: 'America/Bogota',
+    });
+  }
+
+  private estadoLabel(estado: EstadoCita) {
+    const labels: Record<EstadoCita, string> = {
+      pendiente: 'Pendiente',
+      confirmada: 'Confirmada',
+      realizada: 'Realizada',
+      cancelada: 'Cancelada',
+      rechazada: 'Rechazada',
+    };
+
+    return labels[estado] || estado;
+  }
+
+  private throwSupabaseError(message: string): never {
+    if (message.includes('no_citas_solapadas_cliente')) {
+      throw new BadRequestException('Ya tienes una cita en ese rango. Elige otro horario.');
+    }
+
+    if (message.includes('no_citas_solapadas_barbero')) {
+      throw new BadRequestException('El barbero ya tiene una cita en ese rango.');
+    }
+
+    if (message.includes('no_slots_solapados_barbero')) {
+      throw new BadRequestException(
+        'Ya tienes un horario disponible en ese rango. Ajusta el horario.',
+      );
+    }
+
+    if (message.includes('minimum') || message.includes('anticipacion')) {
+      throw new BadRequestException(
+        'Solo puedes modificar citas con al menos 1 dia de antelacion.',
+      );
+    }
+
+    throw new InternalServerErrorException(message);
+  }
+
+  private getActionClient(authorization?: string) {
+    const token = authorization?.replace(/^Bearer\s+/i, '').trim();
+
+    if (!token) {
+      return supabaseAdmin;
+    }
+
+    return createSupabaseUserClient(token);
   }
 }

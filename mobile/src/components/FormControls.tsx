@@ -8,10 +8,11 @@ import {
   TextInput,
   View,
 } from 'react-native';
-import { colors } from '../theme';
+import { colors, fonts } from '../theme';
 
 export const userIcon = require('../../assets/user.png');
 export const keyIcon = require('../../assets/key.png');
+export const phoneIcon = require('../../assets/phone.png');
 
 export function Input({
   icon,
@@ -140,7 +141,7 @@ const styles = StyleSheet.create({
     paddingHorizontal: 18,
     color: colors.black,
     fontSize: 18,
-    fontWeight: '500',
+    fontFamily: fonts.medium,
   },
   inputWithIcon: {
     paddingLeft: 50,
@@ -172,12 +173,12 @@ const styles = StyleSheet.create({
   primaryText: {
     color: colors.white,
     fontSize: 18,
-    fontWeight: '800',
+    fontFamily: fonts.title,
   },
   secondaryText: {
     color: colors.darkGold,
     fontSize: 18,
-    fontWeight: '800',
+    fontFamily: fonts.title,
   },
   inlineRow: {
     flexDirection: 'row',
@@ -189,17 +190,17 @@ const styles = StyleSheet.create({
   smallText: {
     color: colors.gray,
     fontSize: 16,
-    fontWeight: '500',
+    fontFamily: fonts.medium,
   },
   linkText: {
     color: colors.darkGold,
     fontSize: 16,
-    fontWeight: '800',
+    fontFamily: fonts.title,
   },
   feedback: {
     textAlign: 'center',
     fontSize: 16,
-    fontWeight: '700',
+    fontFamily: fonts.medium,
   },
   errorText: {
     color: colors.danger,

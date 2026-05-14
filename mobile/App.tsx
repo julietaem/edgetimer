@@ -1,6 +1,9 @@
 import { StatusBar } from 'expo-status-bar';
+import { useFonts } from 'expo-font';
 import { useMemo, useState } from 'react';
 import {
+  ActivityIndicator,
+  Image,
   KeyboardAvoidingView,
   Platform,
   SafeAreaView,
@@ -9,23 +12,34 @@ import {
   Text,
   View,
 } from 'react-native';
+import { AppShell } from './src/components/AppShell';
+import api from './src/api';
+import { AgendaScreen } from './src/screens/Agenda';
 import { HomeScreen } from './src/screens/Home';
 import { LoginScreen } from './src/screens/Login';
 import { RegisterScreen } from './src/screens/Register';
 import { RoleScreen } from './src/screens/Role';
-import { colors } from './src/theme';
-import type { Role, Screen, SessionProfile } from './src/types';
+import { colors, fonts } from './src/theme';
+import type { AppScreen, Role, Screen, SessionProfile } from './src/types';
+
+const logo = require('./assets/icon.png');
 
 export default function App() {
   const [screen, setScreen] = useState<Screen>('role');
   const [role, setRole] = useState<Role>('cliente');
   const [profile, setProfile] = useState<SessionProfile | null>(null);
   const [feedback, setFeedback] = useState('');
+  const [fontsLoaded] = useFonts({
+    Satoshi: require('./assets/fonts/Satoshi-Variable.ttf'),
+    SatoshiItalic: require('./assets/fonts/Satoshi-VariableItalic.ttf'),
+    DarkerGrotesqueLight: require('./assets/fonts/DarkerGrotesque-Light.ttf'),
+    DarkerGrotesqueMedium: require('./assets/fonts/DarkerGrotesque-Medium.ttf'),
+  });
 
   const title = useMemo(() => {
     if (screen === 'role') return 'Bienvenido';
     if (screen === 'register') return 'Registrarse';
-    if (screen === 'login') return 'Iniciar Sesión';
+    if (screen === 'login') return 'Iniciar Sesion';
     return '';
   }, [screen]);
 
@@ -49,19 +63,37 @@ export default function App() {
   };
 
   const handleLogout = () => {
+    delete api.defaults.headers.common.Authorization;
     setProfile(null);
     setFeedback('');
     setRole('cliente');
     setScreen('role');
   };
 
-  if (screen === 'home') {
+  if (!fontsLoaded) {
     return (
-      <HomeScreen
-        profile={profile}
-        role={profile?.role ?? role}
+      <SafeAreaView style={styles.loading}>
+        <ActivityIndicator color={colors.gold} />
+      </SafeAreaView>
+    );
+  }
+
+  if (screen === 'home' || screen === 'agenda') {
+    const appScreen = screen as AppScreen;
+    const activeRole = profile?.role ?? role;
+
+    return (
+      <AppShell
+        activeScreen={appScreen}
         onLogout={handleLogout}
-      />
+        onNavigate={(nextScreen) => setScreen(nextScreen)}
+      >
+        {appScreen === 'home' ? (
+          <HomeScreen profile={profile} role={activeRole} />
+        ) : (
+          <AgendaScreen profile={profile} role={activeRole} />
+        )}
+      </AppShell>
     );
   }
 
@@ -76,9 +108,7 @@ export default function App() {
           contentContainerStyle={styles.scrollContent}
           keyboardShouldPersistTaps="handled"
         >
-          <View style={styles.brandMark}>
-            <Text style={styles.brandLetters}>AC</Text>
-          </View>
+          <Image source={logo} style={styles.logo} />
           <Text style={styles.title}>{title}</Text>
 
           {screen === 'role' && (
@@ -97,7 +127,7 @@ export default function App() {
                 setScreen('role');
               }}
               onRegistered={() => {
-                setFeedback('Registro exitoso. Ahora inicia sesión.');
+                setFeedback('Registro exitoso. Ahora inicia sesion.');
                 setScreen('login');
               }}
               onLogin={() => goToLogin('cliente')}
@@ -126,6 +156,12 @@ export default function App() {
 }
 
 const styles = StyleSheet.create({
+  loading: {
+    flex: 1,
+    alignItems: 'center',
+    justifyContent: 'center',
+    backgroundColor: colors.background,
+  },
   safeArea: {
     flex: 1,
     backgroundColor: colors.background,
@@ -139,27 +175,16 @@ const styles = StyleSheet.create({
     justifyContent: 'center',
     padding: 24,
   },
-  brandMark: {
-    width: 92,
-    height: 92,
-    borderRadius: 46,
-    backgroundColor: colors.black,
-    alignItems: 'center',
-    justifyContent: 'center',
-    borderWidth: 3,
-    borderColor: colors.gold,
-    marginBottom: 28,
-  },
-  brandLetters: {
-    color: colors.lightGold,
-    fontSize: 32,
-    fontWeight: '800',
-    letterSpacing: 0,
+  logo: {
+    width: 118,
+    height: 118,
+    borderRadius: 28,
+    marginBottom: 22,
   },
   title: {
     color: colors.black,
+    fontFamily: fonts.title,
     fontSize: 38,
-    fontWeight: '800',
     marginBottom: 28,
     textAlign: 'center',
   },

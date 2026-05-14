@@ -42,6 +42,7 @@ export function LoginScreen({
         email,
         password,
       });
+      api.defaults.headers.common.Authorization = `Bearer ${response.data.session.accessToken}`;
       onLoginSuccess(response.data.profile);
     } catch (error) {
       onFeedback(readError(error, 'No fue posible iniciar sesión'));

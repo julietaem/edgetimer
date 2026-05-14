@@ -87,3 +87,10 @@ report.[0-9]*.[0-9]*.[0-9]*.[0-9]*.json
 backend/node_modules/
 backend/.env
 backend/dist/
+
+# Specs
+specs/
+
+# Root logs
+*.err.log
+*.out.log
