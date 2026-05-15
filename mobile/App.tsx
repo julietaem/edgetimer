@@ -17,6 +17,7 @@ import api from './src/api';
 import { AgendaScreen } from './src/screens/Agenda';
 import { HomeScreen } from './src/screens/Home';
 import { LoginScreen } from './src/screens/Login';
+import { PerfilScreen } from './src/screens/Perfil';
 import { RegisterScreen } from './src/screens/Register';
 import { RoleScreen } from './src/screens/Role';
 import { colors, fonts } from './src/theme';
@@ -28,6 +29,7 @@ export default function App() {
   const [screen, setScreen] = useState<Screen>('role');
   const [role, setRole] = useState<Role>('cliente');
   const [profile, setProfile] = useState<SessionProfile | null>(null);
+  const [barberoId, setBarberoId] = useState<string | undefined>();
   const [feedback, setFeedback] = useState('');
   const [fontsLoaded] = useFonts({
     Satoshi: require('./assets/fonts/Satoshi-Variable.ttf'),
@@ -65,6 +67,7 @@ export default function App() {
   const handleLogout = () => {
     delete api.defaults.headers.common.Authorization;
     setProfile(null);
+    setBarberoId(undefined);
     setFeedback('');
     setRole('cliente');
     setScreen('role');
@@ -78,7 +81,7 @@ export default function App() {
     );
   }
 
-  if (screen === 'home' || screen === 'agenda') {
+  if (screen === 'home' || screen === 'agenda' || screen === 'perfil') {
     const appScreen = screen as AppScreen;
     const activeRole = profile?.role ?? role;
 
@@ -86,12 +89,38 @@ export default function App() {
       <AppShell
         activeScreen={appScreen}
         onLogout={handleLogout}
-        onNavigate={(nextScreen) => setScreen(nextScreen)}
+        onNavigate={(nextScreen) => {
+          if (nextScreen === 'perfil') {
+            if (profile?.role === 'barbero') {
+              setBarberoId(profile.id);
+            } else {
+              setBarberoId(undefined);
+            }
+          }
+          setScreen(nextScreen);
+        }}
       >
         {appScreen === 'home' ? (
-          <HomeScreen profile={profile} role={activeRole} />
-        ) : (
+          <HomeScreen
+            profile={profile}
+            role={activeRole}
+            onViewBarbero={(id) => {
+              setBarberoId(id);
+              setScreen('perfil');
+            }}
+          />
+        ) : appScreen === 'agenda' ? (
           <AgendaScreen profile={profile} role={activeRole} />
+        ) : (
+          <PerfilScreen
+            profile={profile}
+            role={activeRole}
+            barberoId={barberoId}
+            onBack={() => {
+              setBarberoId(undefined);
+              setScreen('home');
+            }}
+          />
         )}
       </AppShell>
     );

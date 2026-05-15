@@ -103,6 +103,8 @@ export class AuthService {
       throw new UnauthorizedException('El rol no coincide con esta cuenta');
     }
 
+    const createdAt = data.user.created_at || profile.createdAt;
+
     return {
       message: 'Inicio de sesion exitoso',
       session: {
@@ -110,7 +112,10 @@ export class AuthService {
         refreshToken: data.session.refresh_token,
         expiresAt: data.session.expires_at,
       },
-      profile,
+      profile: {
+        ...profile,
+        createdAt,
+      },
     };
   }
 
@@ -143,7 +148,16 @@ export class AuthService {
       throw new UnauthorizedException('No hay perfil asociado a esta cuenta');
     }
 
-    return data as AuthProfile;
+    const profileData = data as any;
+    return {
+      ...profileData,
+      foto: profileData.foto_perfil ?? profileData.foto ?? null,
+      createdAt:
+        profileData.created_at ??
+        profileData.createdAt ??
+        profileData.fecha_registro ??
+        profileData.fechaRegistro,
+    } as AuthProfile;
   }
 
   private normalizeEmail(value: string) {

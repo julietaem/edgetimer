@@ -19,4 +19,6 @@ export interface AuthProfile {
   usuario: string;
   email?: string;
   role: UserRole;
+  foto?: string | null;
+  createdAt?: string;
 }

@@ -1,6 +1,6 @@
 export type Role = 'cliente' | 'barbero';
 export type AuthScreen = 'role' | 'login' | 'register';
-export type AppScreen = 'home' | 'agenda';
+export type AppScreen = 'home' | 'agenda' | 'perfil';
 export type Screen = AuthScreen | AppScreen;
 
 export interface SessionProfile {
@@ -8,6 +8,8 @@ export interface SessionProfile {
   nombre: string;
   usuario: string;
   role: Role;
+  foto?: string | null;
+  createdAt?: string;
 }
 
 export type EstadoCita =

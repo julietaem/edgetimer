@@ -15,6 +15,7 @@ import type { AppScreen } from '../types';
 const logo = require('../../assets/icon.png');
 const homeIcon = require('../../assets/home.png');
 const calendarIcon = require('../../assets/calendar.png');
+const userIcon = require('../../assets/user.png');
 const logoutIcon = require('../../assets/logout.png');
 
 export function AppShell({
@@ -54,6 +55,15 @@ export function AppShell({
         label="Agenda"
         onPress={() => {
           onNavigate('agenda');
+          setMenuOpen(false);
+        }}
+      />
+      <MenuButton
+        active={activeScreen === 'perfil'}
+        icon={userIcon}
+        label="Mi Perfil"
+        onPress={() => {
+          onNavigate('perfil');
           setMenuOpen(false);
         }}
       />

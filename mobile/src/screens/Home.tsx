@@ -22,9 +22,11 @@ const hourOptions = buildHourOptions();
 export function HomeScreen({
   profile,
   role,
+  onViewBarbero,
 }: {
   profile: SessionProfile | null;
   role: Role;
+  onViewBarbero?: (barberoId: string) => void;
 }) {
   const isBarber = role === 'barbero';
   const { width } = useWindowDimensions();
@@ -135,6 +137,7 @@ export function HomeScreen({
             setSelectedBarberId(id);
             setRequestOpen(true);
           }}
+          onViewBarbero={onViewBarbero}
         />
       )}
 
@@ -239,6 +242,7 @@ function ClientHome({
   slots,
   onReserve,
   onSelectBarber,
+  onViewBarbero,
 }: {
   barberos: Barbero[];
   isCompact: boolean;
@@ -246,6 +250,7 @@ function ClientHome({
   slots: SlotDisponible[];
   onReserve: (slot: SlotDisponible) => void;
   onSelectBarber: (id: string) => void;
+  onViewBarbero?: (barberoId: string) => void;
 }) {
   return (
     <View>
@@ -280,7 +285,7 @@ function ClientHome({
           <Pressable
             key={barbero.id}
             style={[styles.barberCard, isCompact && styles.fullWidthCard]}
-            onPress={() => onSelectBarber(barbero.id)}
+            onPress={() => onViewBarbero?.(barbero.id)}
           >
             <Avatar source={barbero.foto} size={78} />
             <Text style={styles.cardTitle}>{barbero.nombre}</Text>
@@ -289,6 +294,15 @@ function ClientHome({
             </Text>
             <Text style={styles.cardText}>{barbero.horarioLaboral}</Text>
             <Text style={styles.rating}>* {barbero.promedioCalificacion.toFixed(1)}</Text>
+            <Pressable
+              style={styles.smallButton}
+              onPress={(e) => {
+                e.stopPropagation?.();
+                onSelectBarber(barbero.id);
+              }}
+            >
+              <Text style={styles.smallButtonText}>Solicitar Cita</Text>
+            </Pressable>
           </Pressable>
         ))}
       </View>
