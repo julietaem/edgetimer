@@ -757,6 +757,7 @@ const styles = StyleSheet.create({
     padding: 14,
     flexGrow: 1,
     flexBasis: 210,
+    alignSelf: 'flex-start',
   },
   barberCard: {
     alignItems: 'flex-start',
