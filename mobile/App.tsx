@@ -120,6 +120,7 @@ export default function App() {
               setBarberoId(undefined);
               setScreen('home');
             }}
+            onProfileUpdate={(nextProfile) => setProfile(nextProfile)}
           />
         )}
       </AppShell>

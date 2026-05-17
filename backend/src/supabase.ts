@@ -29,3 +29,22 @@ export const createSupabaseUserClient = (accessToken: string) =>
       },
     },
   });
+
+export async function getSignedStorageUrl(value?: string | null) {
+  if (!value) {
+    return null;
+  }
+
+  const match = value.match(/\/storage\/v1\/object\/(?:public|sign)\/([^/]+)\/([^?]+)/);
+  if (!match) {
+    return value;
+  }
+
+  const bucket = match[1];
+  const path = decodeURIComponent(match[2]);
+  const { data, error } = await supabaseAdmin.storage
+    .from(bucket)
+    .createSignedUrl(path, 60 * 60 * 24 * 7);
+
+  return error ? value : data.signedUrl;
+}

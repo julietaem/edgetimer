@@ -21,11 +21,13 @@ export function PerfilScreen({
   role,
   barberoId,
   onBack,
+  onProfileUpdate,
 }: {
   profile: SessionProfile | null;
   role: Role;
   barberoId?: string;
   onBack: () => void;
+  onProfileUpdate: (profile: SessionProfile) => void;
 }) {
   const isBarber = role === 'barbero';
   const { width } = useWindowDimensions();
@@ -95,7 +97,12 @@ export function PerfilScreen({
           ? `/catalogos/barberos/${profile.id}/foto`
           : `/catalogos/clientes/${profile.id}/foto`;
 
-      await api.post(endpoint, body);
+      const response = await api.post(endpoint, body);
+      const uploadedUrl = response.data?.url;
+
+      if (uploadedUrl) {
+        onProfileUpdate({ ...profile, foto: uploadedUrl });
+      }
 
       showToast('Foto subida correctamente.');
       if (barberoId) {

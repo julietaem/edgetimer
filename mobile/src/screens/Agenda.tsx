@@ -81,7 +81,7 @@ export function AgendaScreen({
       );
     }
     if (tab === 'solicitudes') {
-      return citas.filter((cita) => cita.estado === 'pendiente');
+      return citas.filter((cita) => ['pendiente', 'rechazada', 'cancelada'].includes(cita.estado));
     }
     if (tab === 'calendario') {
       return [];
@@ -134,7 +134,7 @@ export function AgendaScreen({
       <View style={styles.contentGrid}>
         <View style={[styles.listColumn, showCalendarTab && tab === 'calendario' && styles.hidden]}>
           {filtered.length === 0 ? (
-            <Text style={styles.empty}>No hay citas para esta pestaña.</Text>
+            <Text style={styles.empty}>No hay citas para esta pestana.</Text>
           ) : (
             filtered.map((cita) => (
               <AgendaCard
@@ -185,7 +185,7 @@ export function AgendaScreen({
               <View key={slot.id} style={styles.dayItem}>
                 <Text style={styles.itemTitle}>Horario pendiente</Text>
                 <Text style={styles.itemText}>
-                  {slot.barbero.nombre} · {slot.horaInicio} - {slot.horaFin}
+                  {slot.barbero.nombre} - {slot.horaInicio} - {slot.horaFin}
                 </Text>
               </View>
             ))}
@@ -195,7 +195,7 @@ export function AgendaScreen({
                   {isBarber ? cita.cliente.nombre : cita.barbero.nombre}
                 </Text>
                 <Text style={styles.itemText}>
-                  {cita.horaInicio} - {cita.horaFin} · {cita.estadoLabel}
+                  {cita.horaInicio} - {cita.horaFin} - {cita.estadoLabel}
                 </Text>
               </View>
             ))}
@@ -264,6 +264,7 @@ function AgendaCard({
   const name = isBarber ? cita.cliente.nombre : cita.barbero.nombre;
   const isRequest = cita.estado === 'pendiente';
   const isPast = cita.estado === 'realizada';
+  const isClosed = cita.estado === 'rechazada' || cita.estado === 'cancelada';
   const disabled = !cita.puedeModificar;
 
   return (
@@ -272,7 +273,7 @@ function AgendaCard({
       <Text style={styles.cardText}>{cita.procedimientos.map((item) => item.nombre).join(', ')}</Text>
       <Text style={styles.cardText}>{formatMoney(cita.costoTotal)}</Text>
       <Text style={styles.cardText}>
-        {formatShortDate(cita.fecha)} · {cita.horaInicio} - {cita.horaFin}
+        {formatShortDate(cita.fecha)} - {cita.horaInicio} - {cita.horaFin}
       </Text>
       <Text style={styles.status}>{cita.estadoLabel}</Text>
 
@@ -291,6 +292,14 @@ function AgendaCard({
           ) : (
             <Text style={styles.cardText}>Cita pendiente de cierre.</Text>
           )}
+        </View>
+      ) : isClosed ? (
+        <View style={styles.pastBox}>
+          <Text style={styles.cardText}>
+            {cita.estado === 'rechazada'
+              ? 'Esta solicitud fue rechazada.'
+              : 'Esta cita fue cancelada.'}
+          </Text>
         </View>
       ) : (
         <View style={styles.actions}>
@@ -361,7 +370,7 @@ function CalendarPanel({
           <View key={slot.id} style={styles.dayItem}>
             <Text style={styles.itemTitle}>Horario pendiente</Text>
             <Text style={styles.itemText}>
-              {slot.barbero.nombre} Â· {slot.horaInicio} - {slot.horaFin}
+              {slot.barbero.nombre} - {slot.horaInicio} - {slot.horaFin}
             </Text>
           </View>
         ))}
@@ -371,7 +380,7 @@ function CalendarPanel({
               {isBarber ? cita.cliente.nombre : cita.barbero.nombre}
             </Text>
             <Text style={styles.itemText}>
-              {cita.horaInicio} - {cita.horaFin} Â· {cita.estadoLabel}
+              {cita.horaInicio} - {cita.horaFin} - {cita.estadoLabel}
             </Text>
           </View>
         ))}
@@ -522,7 +531,7 @@ function RatingModal({
       </View>
       <TextInput
         multiline
-        placeholder="Reseña"
+        placeholder="Resena"
         placeholderTextColor={colors.muted}
         style={[styles.input, styles.textArea]}
         value={resena}
@@ -743,6 +752,7 @@ const styles = StyleSheet.create({
     marginTop: 14,
   },
   smallButton: {
+    alignSelf: 'flex-start',
     backgroundColor: colors.black,
     borderRadius: 8,
     paddingHorizontal: 14,
@@ -754,6 +764,7 @@ const styles = StyleSheet.create({
     fontSize: 16,
   },
   ghostButton: {
+    alignSelf: 'flex-start',
     borderColor: colors.gold,
     borderRadius: 8,
     borderWidth: 1,

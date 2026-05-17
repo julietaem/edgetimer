@@ -1,5 +1,5 @@
 import { Injectable, InternalServerErrorException } from '@nestjs/common';
-import { supabaseAdmin } from '../supabase';
+import { getSignedStorageUrl, supabaseAdmin } from '../supabase';
 
 export type UploadedBarberoPhotoFile = {
   buffer: Buffer;
@@ -45,10 +45,10 @@ export class CatalogosService {
       throw new InternalServerErrorException(error.message);
     }
 
-    return (data || []).map((barbero: any) => ({
+    return Promise.all((data || []).map(async (barbero: any) => ({
       id: barbero.id_barbero,
       nombre: barbero.nombre_barbero,
-      foto: barbero.foto_perfil || null,
+      foto: await getSignedStorageUrl(barbero.foto_perfil),
       promedioCalificacion: Number(barbero.promedio_calificacion || 0),
       especialidades: (barbero.barbero_procedimiento || [])
         .map((item: any) => item.procedimiento)
@@ -60,7 +60,7 @@ export class CatalogosService {
           duracionMinutos: item.duracion_minutos,
         })),
       horarioLaboral: 'Lunes a viernes, 8am-6pm',
-    }));
+    })));
   }
 
   async barberoById(id: string) {
@@ -88,7 +88,7 @@ export class CatalogosService {
     return {
       id: data.id_barbero,
       nombre: data.nombre_barbero,
-      foto: data.foto_perfil || null,
+      foto: await getSignedStorageUrl(data.foto_perfil),
       promedioCalificacion: Number(data.promedio_calificacion || 0),
       especialidades: (data.barbero_procedimiento || [])
         .map((item: any) => item.procedimiento)
@@ -149,6 +149,7 @@ export class CatalogosService {
       fileName,
       file,
     );
+    const signedUrl = await getSignedStorageUrl(photoUrl);
 
     const { error: updateError } = await supabaseAdmin
       .from('barbero')
@@ -159,7 +160,7 @@ export class CatalogosService {
       throw new InternalServerErrorException(updateError.message);
     }
 
-    return { url: photoUrl };
+    return { url: signedUrl || photoUrl };
   }
 
   async uploadClientePhoto(id: string, file: UploadedClientePhotoFile) {
@@ -174,6 +175,7 @@ export class CatalogosService {
       fileName,
       file,
     );
+    const signedUrl = await getSignedStorageUrl(photoUrl);
 
     const { error: updateError } = await supabaseAdmin
       .from('cliente')
@@ -184,7 +186,7 @@ export class CatalogosService {
       throw new InternalServerErrorException(updateError.message);
     }
 
-    return { url: photoUrl };
+    return { url: signedUrl || photoUrl };
   }
 
   async procedimientos() {

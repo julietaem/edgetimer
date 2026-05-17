@@ -34,14 +34,14 @@ export interface CreateSlotDto {
   profileId: string;
   fecha: string;
   horaInicio: string;
-  horaFin: string;
+  horaFin?: string;
 }
 
 export interface UpdateSlotDto {
   profileId: string;
   fecha: string;
   horaInicio: string;
-  horaFin: string;
+  horaFin?: string;
 }
 
 export interface CitaActionDto {

@@ -5,7 +5,7 @@ import {
   InternalServerErrorException,
   UnauthorizedException,
 } from '@nestjs/common';
-import { createSupabaseUserClient, supabase } from '../supabase';
+import { createSupabaseUserClient, getSignedStorageUrl, supabase } from '../supabase';
 import type {
   AuthProfile,
   LoginDto,
@@ -151,7 +151,7 @@ export class AuthService {
     const profileData = data as any;
     return {
       ...profileData,
-      foto: profileData.foto_perfil ?? profileData.foto ?? null,
+      foto: await getSignedStorageUrl(profileData.foto_perfil ?? profileData.foto),
       createdAt:
         profileData.created_at ??
         profileData.createdAt ??

@@ -5,7 +5,7 @@ import {
   InternalServerErrorException,
   NotFoundException,
 } from '@nestjs/common';
-import { createSupabaseUserClient, supabaseAdmin } from '../supabase';
+import { createSupabaseUserClient, getSignedStorageUrl, supabaseAdmin } from '../supabase';
 import type {
   CalificarCitaDto,
   CitaActionDto,
@@ -20,11 +20,16 @@ import type {
 
 const TIME_ZONE_OFFSET = '-05:00';
 const MIN_SLOT_MINUTES = 15;
+const SLOT_DURATION_MINUTES = 15;
+const BUSINESS_START_MINUTES = 8 * 60;
+const BUSINESS_END_MINUTES = 18 * 60;
 
 @Injectable()
 export class CitasService {
   async list(query: ListCitasQuery) {
     this.requireText(query.profileId, 'Falta el perfil');
+    await this.realizarCitasVencidas();
+
     const column = query.role === 'barbero' ? 'id_barbero' : 'id_cliente';
 
     let request = supabaseAdmin
@@ -60,7 +65,7 @@ export class CitasService {
       throw new InternalServerErrorException(error.message);
     }
 
-    return (data || []).map((cita: any) => this.mapCita(cita));
+    return Promise.all((data || []).map((cita: any) => this.mapCita(cita)));
   }
 
   async listSlots(profileId?: string) {
@@ -90,14 +95,25 @@ export class CitasService {
       throw new InternalServerErrorException(error.message);
     }
 
-    return (data || []).map((slot: any) => this.mapSlot(slot));
+    const slots = data || [];
+    const citasActivas = await this.findActiveCitasForSlots(
+      slots.map((slot: any) => slot.id_barbero),
+    );
+
+    return Promise.all(
+      slots
+        .filter((slot: any) => !this.overlapsAnyCita(slot, citasActivas))
+        .map((slot: any) => this.mapSlot(slot)),
+    );
   }
 
   async createSlot(dto: CreateSlotDto) {
     const profileId = this.requireText(dto.profileId, 'Falta el perfil');
     const inicioAt = this.toDate(dto.fecha, dto.horaInicio);
-    const finAt = this.toDate(dto.fecha, dto.horaFin);
+    const finAt = this.addMinutes(inicioAt, SLOT_DURATION_MINUTES);
     this.validateRange(inicioAt, finAt);
+    this.validateBusinessHours(inicioAt, finAt);
+    await this.ensureNoBarberCitaOverlap(profileId, inicioAt, finAt);
 
     const { data, error } = await supabaseAdmin
       .from('slot_cita')
@@ -125,7 +141,7 @@ export class CitasService {
 
     return {
       message: 'Horario disponible creado exitosamente.',
-      slot: this.mapSlot(data),
+      slot: await this.mapSlot(data),
     };
   }
 
@@ -138,8 +154,10 @@ export class CitasService {
     }
 
     const inicioAt = this.toDate(dto.fecha, dto.horaInicio);
-    const finAt = this.toDate(dto.fecha, dto.horaFin);
+    const finAt = this.addMinutes(inicioAt, SLOT_DURATION_MINUTES);
     this.validateRange(inicioAt, finAt);
+    this.validateBusinessHours(inicioAt, finAt);
+    await this.ensureNoBarberCitaOverlap(current.id_barbero, inicioAt, finAt);
 
     const { data, error } = await supabaseAdmin
       .from('slot_cita')
@@ -166,7 +184,7 @@ export class CitasService {
 
     return {
       message: 'Horario actualizado.',
-      slot: this.mapSlot(data),
+      slot: await this.mapSlot(data),
     };
   }
 
@@ -199,6 +217,8 @@ export class CitasService {
       inicioAt,
       procedimientos.reduce((total, item) => total + item.duracion_minutos, 0),
     );
+    this.validateRange(inicioAt, finAt);
+    this.validateBusinessHours(inicioAt, finAt);
 
     const { data, error } = await supabaseAdmin
       .from('cita')
@@ -234,6 +254,15 @@ export class CitasService {
       throw new BadRequestException('El horario seleccionado no esta disponible.');
     }
 
+    const procedimientos = await this.findProcedimientos(procedimientoIds);
+    const inicioAt = new Date(slot.inicio_at);
+    const finAt = this.addMinutes(
+      inicioAt,
+      procedimientos.reduce((total, item) => total + item.duracion_minutos, 0),
+    );
+    this.validateRange(inicioAt, finAt);
+    this.validateBusinessHours(inicioAt, finAt);
+
     const { data, error } = await supabaseAdmin
       .from('cita')
       .insert({
@@ -241,7 +270,7 @@ export class CitasService {
         id_barbero: slot.id_barbero,
         id_slot: slot.id_slot,
         inicio_at: slot.inicio_at,
-        fin_at: slot.fin_at,
+        fin_at: finAt.toISOString(),
         estado: 'confirmada',
         notas_cliente: dto.notas || null,
       })
@@ -300,6 +329,7 @@ export class CitasService {
     const inicioAt = this.toDate(dto.fecha, dto.horaInicio);
     const finAt = this.toDate(dto.fecha, dto.horaFin);
     this.validateRange(inicioAt, finAt);
+    this.validateBusinessHours(inicioAt, finAt);
 
     const { data, error } = await supabaseAdmin
       .from('cita')
@@ -334,7 +364,7 @@ export class CitasService {
 
     return {
       message: 'Cita reprogramada.',
-      cita: this.mapCita(data),
+      cita: await this.mapCita(data),
     };
   }
 
@@ -409,8 +439,20 @@ export class CitasService {
 
     return {
       message,
-      cita: this.mapCita(data),
+      cita: await this.mapCita(data),
     };
+  }
+
+  private async realizarCitasVencidas() {
+    const { error } = await supabaseAdmin
+      .from('cita')
+      .update({ estado: 'realizada' })
+      .eq('estado', 'confirmada')
+      .lt('fin_at', new Date().toISOString());
+
+    if (error) {
+      throw new InternalServerErrorException(error.message);
+    }
   }
 
   private async findCita(citaId: string) {
@@ -490,6 +532,65 @@ export class CitasService {
     return data as { id_procedimiento: string; duracion_minutos: number }[];
   }
 
+  private async findActiveCitasForSlots(barberoIds: string[]) {
+    const ids = [...new Set(barberoIds.filter(Boolean))];
+    if (ids.length === 0) {
+      return [];
+    }
+
+    const { data, error } = await supabaseAdmin
+      .from('cita')
+      .select('id_barbero, inicio_at, fin_at')
+      .in('id_barbero', ids)
+      .in('estado', ['pendiente', 'confirmada'])
+      .gt('fin_at', new Date().toISOString());
+
+    if (error) {
+      throw new InternalServerErrorException(error.message);
+    }
+
+    return data || [];
+  }
+
+  private async ensureNoBarberCitaOverlap(
+    barberoId: string,
+    inicioAt: Date,
+    finAt: Date,
+  ) {
+    const { data, error } = await supabaseAdmin
+      .from('cita')
+      .select('id_cita')
+      .eq('id_barbero', barberoId)
+      .in('estado', ['pendiente', 'confirmada'])
+      .lt('inicio_at', finAt.toISOString())
+      .gt('fin_at', inicioAt.toISOString())
+      .limit(1);
+
+    if (error) {
+      throw new InternalServerErrorException(error.message);
+    }
+
+    if (data && data.length > 0) {
+      throw new BadRequestException('Ya tienes una cita en ese horario.');
+    }
+  }
+
+  private overlapsAnyCita(slot: any, citas: any[]) {
+    const start = new Date(slot.inicio_at).getTime();
+    const end = new Date(slot.fin_at).getTime();
+
+    return citas.some((cita) => {
+      if (cita.id_barbero !== slot.id_barbero) {
+        return false;
+      }
+
+      return (
+        new Date(cita.inicio_at).getTime() < end &&
+        new Date(cita.fin_at).getTime() > start
+      );
+    });
+  }
+
   private async insertProcedimientos(citaId: string, procedimientoIds: string[]) {
     const { error } = await supabaseAdmin.from('cita_procedimiento').insert(
       procedimientoIds.map((id) => ({
@@ -503,7 +604,7 @@ export class CitasService {
     }
   }
 
-  private mapCita(cita: any) {
+  private async mapCita(cita: any) {
     const procedimientos = (cita.cita_procedimiento || [])
       .map((item: any) => item.procedimiento)
       .filter(Boolean);
@@ -520,12 +621,12 @@ export class CitasService {
       cliente: {
         id: cita.id_cliente,
         nombre: cita.cliente?.nombre_cliente || 'Cliente',
-        foto: cita.cliente?.foto_perfil || null,
+        foto: await getSignedStorageUrl(cita.cliente?.foto_perfil),
       },
       barbero: {
         id: cita.id_barbero,
         nombre: cita.barbero?.nombre_barbero || 'Barbero',
-        foto: cita.barbero?.foto_perfil || null,
+        foto: await getSignedStorageUrl(cita.barbero?.foto_perfil),
         promedioCalificacion: Number(cita.barbero?.promedio_calificacion || 0),
       },
       slotId: cita.id_slot,
@@ -554,13 +655,13 @@ export class CitasService {
     };
   }
 
-  private mapSlot(slot: any) {
+  private async mapSlot(slot: any) {
     return {
       id: slot.id_slot,
       barbero: {
         id: slot.id_barbero,
         nombre: slot.barbero?.nombre_barbero || 'Barbero',
-        foto: slot.barbero?.foto_perfil || null,
+        foto: await getSignedStorageUrl(slot.barbero?.foto_perfil),
         promedioCalificacion: Number(slot.barbero?.promedio_calificacion || 0),
       },
       inicioAt: slot.inicio_at,
@@ -603,6 +704,27 @@ export class CitasService {
     if (minutes < MIN_SLOT_MINUTES) {
       throw new BadRequestException('El horario debe durar al menos 15 minutos.');
     }
+  }
+
+  private validateBusinessHours(inicioAt: Date, finAt: Date) {
+    if (this.formatDate(inicioAt.toISOString()) !== this.formatDate(finAt.toISOString())) {
+      throw new BadRequestException('La cita debe terminar el mismo dia laboral.');
+    }
+
+    const startMinutes = this.minutesFromDate(inicioAt);
+    const endMinutes = this.minutesFromDate(finAt);
+
+    if (startMinutes < BUSINESS_START_MINUTES || endMinutes > BUSINESS_END_MINUTES) {
+      throw new BadRequestException('El horario debe estar entre 08:00 y 18:00.');
+    }
+  }
+
+  private minutesFromDate(value: Date) {
+    const [hours, minutes] = this.formatHour(value.toISOString())
+      .split(':')
+      .map((part) => Number(part));
+
+    return hours * 60 + minutes;
   }
 
   private addMinutes(date: Date, minutes: number) {

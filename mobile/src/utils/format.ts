@@ -17,9 +17,10 @@ export const todayInputValue = () =>
 
 export const buildHourOptions = () => {
   const options: string[] = [];
-  for (let hour = 8; hour <= 18; hour += 1) {
-    options.push(`${String(hour).padStart(2, '0')}:00`);
-    if (hour < 18) options.push(`${String(hour).padStart(2, '0')}:30`);
+  for (let minutes = 8 * 60; minutes <= 18 * 60; minutes += 15) {
+    const hour = Math.floor(minutes / 60);
+    const minute = minutes % 60;
+    options.push(`${String(hour).padStart(2, '0')}:${String(minute).padStart(2, '0')}`);
   }
   return options;
 };

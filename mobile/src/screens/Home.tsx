@@ -13,11 +13,12 @@ import {
 import api from '../api';
 import { colors, fonts } from '../theme';
 import type { Barbero, Cita, Procedimiento, Role, SessionProfile, SlotDisponible } from '../types';
-import { buildHourOptions, formatMoney, formatShortDate, todayInputValue } from '../utils/format';
+import { addMinutesToTime, buildHourOptions, formatMoney, formatShortDate, todayInputValue } from '../utils/format';
 
 const avatar = require('../../assets/user.png');
 const plusIcon = require('../../assets/plus.png');
 const hourOptions = buildHourOptions();
+const startHourOptions = hourOptions.filter((hour) => hour < '18:00');
 
 export function HomeScreen({
   profile,
@@ -269,7 +270,7 @@ function ClientHome({
               <Text style={styles.cardTitle}>{slot.barbero.nombre}</Text>
               <Text style={styles.cardText}>{formatShortDate(slot.fecha)}</Text>
               <Text style={styles.cardText}>
-                {slot.horaInicio} - {slot.horaFin}
+                Inicio {slot.horaInicio}
               </Text>
               <Pressable style={styles.smallButton} onPress={() => onReserve(slot)}>
                 <Text style={styles.smallButtonText}>Reservar</Text>
@@ -347,6 +348,14 @@ function RequestModal({
         .reduce((sum, item) => sum + item.precio, 0),
     [procedimientos, procedimientoIds],
   );
+  const totalDuration = useMemo(
+    () =>
+      procedimientos
+        .filter((item) => procedimientoIds.includes(item.id))
+        .reduce((sum, item) => sum + item.duracionMinutos, 0),
+    [procedimientos, procedimientoIds],
+  );
+  const horaFin = totalDuration > 0 ? addMinutesToTime(horaInicio, totalDuration) : '';
 
   const submit = async () => {
     if (!idBarbero || procedimientoIds.length === 0 || !fecha || !horaInicio) {
@@ -374,11 +383,19 @@ function RequestModal({
       <DateInput value={fecha} onChange={setFecha} />
       <SelectPills
         label="Hora deseada"
-        options={hourOptions.map((hour) => ({ id: hour, label: hour }))}
+        options={startHourOptions.map((hour) => ({ id: hour, label: hour }))}
         selectedIds={[horaInicio]}
         single
         onChange={(ids) => setHoraInicio(ids[0] || '')}
       />
+      {horaFin ? (
+        <Text style={styles.cardText}>
+          Duracion estimada: {totalDuration} min - {horaInicio} - {horaFin}
+        </Text>
+      ) : null}
+      {horaFin > '18:00' ? (
+        <Text style={styles.error}>La cita debe terminar antes de las 18:00.</Text>
+      ) : null}
       <Text style={styles.total}>Total: {formatMoney(total)}</Text>
       {error ? <Text style={styles.error}>{error}</Text> : null}
     </FormModal>
@@ -403,6 +420,10 @@ function ReserveModal({
   const total = procedimientos
     .filter((item) => procedimientoIds.includes(item.id))
     .reduce((sum, item) => sum + item.precio, 0);
+  const totalDuration = procedimientos
+    .filter((item) => procedimientoIds.includes(item.id))
+    .reduce((sum, item) => sum + item.duracionMinutos, 0);
+  const horaFin = slot && totalDuration > 0 ? addMinutesToTime(slot.horaInicio, totalDuration) : '';
 
   const submit = async () => {
     if (procedimientoIds.length === 0) {
@@ -422,7 +443,7 @@ function ReserveModal({
           <View>
             <Text style={styles.cardTitle}>{slot.barbero.nombre}</Text>
             <Text style={styles.cardText}>
-              {formatShortDate(slot.fecha)} · {slot.horaInicio} - {slot.horaFin}
+              {formatShortDate(slot.fecha)} - Inicio {slot.horaInicio}
             </Text>
           </View>
         </View>
@@ -432,6 +453,14 @@ function ReserveModal({
         selectedIds={procedimientoIds}
         onChange={setProcedimientoIds}
       />
+      {slot && horaFin ? (
+        <Text style={styles.cardText}>
+          Duracion estimada: {totalDuration} min - {slot.horaInicio} - {horaFin}
+        </Text>
+      ) : null}
+      {horaFin > '18:00' ? (
+        <Text style={styles.error}>La cita debe terminar antes de las 18:00.</Text>
+      ) : null}
       <Text style={styles.total}>Total: {formatMoney(total)}</Text>
       {error ? <Text style={styles.error}>{error}</Text> : null}
     </FormModal>
@@ -445,26 +474,19 @@ function SlotModal({
 }: {
   open: boolean;
   onClose: () => void;
-  onSubmit: (payload: { fecha: string; horaInicio: string; horaFin: string }) => Promise<void>;
+  onSubmit: (payload: { fecha: string; horaInicio: string }) => Promise<void>;
 }) {
   const [fecha, setFecha] = useState(todayInputValue());
   const [horaInicio, setHoraInicio] = useState('09:00');
-  const [horaFin, setHoraFin] = useState('10:00');
   const [error, setError] = useState('');
 
-  const validEndOptions = hourOptions.filter((hour) => hour > horaInicio);
-
   const submit = async () => {
-    if (!fecha || !horaInicio || !horaFin) {
+    if (!fecha || !horaInicio) {
       setError('Todos los campos son obligatorios.');
       return;
     }
-    if (horaFin <= horaInicio) {
-      setError('La hora de fin debe ser posterior a la hora de inicio.');
-      return;
-    }
     setError('');
-    await onSubmit({ fecha, horaInicio, horaFin });
+    await onSubmit({ fecha, horaInicio });
   };
 
   return (
@@ -472,18 +494,14 @@ function SlotModal({
       <DateInput value={fecha} onChange={setFecha} />
       <SelectPills
         label="Hora de inicio"
-        options={hourOptions.map((hour) => ({ id: hour, label: hour }))}
+        options={startHourOptions.map((hour) => ({ id: hour, label: hour }))}
         selectedIds={[horaInicio]}
         single
         onChange={(ids) => setHoraInicio(ids[0] || '')}
       />
-      <SelectPills
-        label="Hora de fin"
-        options={validEndOptions.map((hour) => ({ id: hour, label: hour }))}
-        selectedIds={[horaFin]}
-        single
-        onChange={(ids) => setHoraFin(ids[0] || '')}
-      />
+      <Text style={styles.cardText}>
+        Se publicara como inicio disponible de 15 minutos. La duracion final se calcula cuando el cliente elige procedimientos.
+      </Text>
       {error ? <Text style={styles.error}>{error}</Text> : null}
     </FormModal>
   );
@@ -543,7 +561,7 @@ function ProcedurePicker({
       label="Procedimientos"
       options={procedimientos.map((item) => ({
         id: item.id,
-        label: `${item.nombre} · ${formatMoney(item.precio)}`,
+        label: `${item.nombre} - ${item.duracionMinutos} min - ${formatMoney(item.precio)}`,
       }))}
       selectedIds={selectedIds}
       onChange={onChange}
@@ -633,7 +651,7 @@ function AppointmentCard({
       <Text style={styles.cardText}>{cita.procedimientos.map((item) => item.nombre).join(', ')}</Text>
       <Text style={styles.cardText}>{formatMoney(cita.costoTotal)}</Text>
       <Text style={styles.cardText}>
-        {formatShortDate(cita.fecha)} · {cita.horaInicio} - {cita.horaFin}
+        {formatShortDate(cita.fecha)} - {cita.horaInicio} - {cita.horaFin}
       </Text>
       <Text style={styles.status}>{cita.estadoLabel}</Text>
       <View style={styles.cardActions}>
@@ -825,6 +843,7 @@ const styles = StyleSheet.create({
     marginTop: 14,
   },
   smallButton: {
+    alignSelf: 'flex-start',
     backgroundColor: colors.black,
     borderRadius: 8,
     paddingHorizontal: 14,
@@ -836,6 +855,7 @@ const styles = StyleSheet.create({
     fontSize: 16,
   },
   ghostButton: {
+    alignSelf: 'flex-start',
     borderColor: colors.gold,
     borderRadius: 8,
     borderWidth: 1,
