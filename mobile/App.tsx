@@ -1,6 +1,7 @@
 import { StatusBar } from 'expo-status-bar';
 import { useFonts } from 'expo-font';
 import { useMemo, useState } from 'react';
+import { SpeedInsights } from '@vercel/speed-insights/react';
 import {
   ActivityIndicator,
   Image,
@@ -123,6 +124,7 @@ export default function App() {
             onProfileUpdate={(nextProfile) => setProfile(nextProfile)}
           />
         )}
+        <SpeedInsights />
       </AppShell>
     );
   }
@@ -181,6 +183,7 @@ export default function App() {
           {profile && <Text style={styles.hiddenText}>{profile.usuario}</Text>}
         </ScrollView>
       </KeyboardAvoidingView>
+      <SpeedInsights />
     </SafeAreaView>
   );
 }
