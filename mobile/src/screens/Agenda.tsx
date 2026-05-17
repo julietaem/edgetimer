@@ -13,7 +13,7 @@ import {
 import api from '../api';
 import { colors, fonts } from '../theme';
 import type { Cita, Role, SessionProfile, SlotDisponible } from '../types';
-import { buildHourOptions, formatMoney, formatShortDate, isSameDay, todayInputValue } from '../utils/format';
+import { addMinutesToTime, buildHourOptions, formatMoney, formatShortDate, isSameDay, todayInputValue } from '../utils/format';
 
 type TabKey = 'proximas' | 'solicitudes' | 'pasadas' | 'calendario';
 
@@ -200,7 +200,7 @@ export function AgendaScreen({
               </View>
             ))}
             {dayCitas.length === 0 && daySlots.length === 0 ? (
-              <Text style={styles.empty}>Sin citas ni horarios en este dia.</Text>
+              <Text style={styles.empty}>Sin citas ni horarios en este día.</Text>
             ) : null}
           </View>
         </View>
@@ -234,7 +234,7 @@ export function AgendaScreen({
                 profileId: profile?.id,
                 ...payload,
               }),
-            'Calificacion guardada.',
+            'Calificación guardada.',
           ).then(() => setRatingCita(null))
         }
       />
@@ -281,14 +281,14 @@ function AgendaCard({
         <View style={styles.pastBox}>
           {cita.calificacion ? (
             <Text style={styles.cardText}>
-              Calificacion: {cita.calificacion.puntuacion}/5 {cita.calificacion.resena}
+              Calificación: {cita.calificacion.puntuacion}/5 {cita.calificacion.resena}
             </Text>
           ) : !isBarber && cita.estado === 'realizada' ? (
             <Pressable style={styles.smallButton} onPress={onRate}>
               <Text style={styles.smallButtonText}>Calificar esta cita</Text>
             </Pressable>
           ) : isBarber && cita.estado === 'realizada' ? (
-            <Text style={styles.cardText}>Sin calificacion recibida.</Text>
+            <Text style={styles.cardText}>Sin calificación recibida.</Text>
           ) : (
             <Text style={styles.cardText}>Cita pendiente de cierre.</Text>
           )}
@@ -333,7 +333,7 @@ function AgendaCard({
         </View>
       )}
       {disabled && !isPast && !isRequest ? (
-        <Text style={styles.helpText}>Solo puedes modificar citas con al menos 1 dia de antelacion</Text>
+        <Text style={styles.helpText}>Solo puedes modificar citas con al menos 1 día de antelación</Text>
       ) : null}
     </View>
   );
@@ -385,7 +385,7 @@ function CalendarPanel({
           </View>
         ))}
         {dayCitas.length === 0 && daySlots.length === 0 ? (
-          <Text style={styles.empty}>Sin citas ni horarios en este dia.</Text>
+          <Text style={styles.empty}>Sin citas ni horarios en este día.</Text>
         ) : null}
       </View>
     </>
@@ -460,14 +460,29 @@ function ReprogramModal({
 }) {
   const [fecha, setFecha] = useState(cita?.fecha || todayInputValue());
   const [horaInicio, setHoraInicio] = useState(cita?.horaInicio || '09:00');
-  const [horaFin, setHoraFin] = useState(cita?.horaFin || '10:00');
   const [error, setError] = useState('');
+  const duracion = useMemo(
+    () =>
+      cita?.procedimientos.reduce(
+        (total, procedimiento) => total + procedimiento.duracionMinutos,
+        0,
+      ) || 0,
+    [cita],
+  );
+  const horaFin = duracion > 0 ? addMinutesToTime(horaInicio, duracion) : '';
+  const validStartOptions = useMemo(
+    () =>
+      hourOptions.filter((hour) => {
+        const end = addMinutesToTime(hour, duracion);
+        return !!end && end <= '18:00';
+      }),
+    [duracion],
+  );
 
   useEffect(() => {
     if (cita) {
       setFecha(cita.fecha);
       setHoraInicio(cita.horaInicio);
-      setHoraFin(cita.horaFin);
     }
   }, [cita]);
 
@@ -476,8 +491,8 @@ function ReprogramModal({
       setError('Todos los campos son obligatorios.');
       return;
     }
-    if (horaFin <= horaInicio) {
-      setError('La hora de fin debe ser posterior a la hora de inicio.');
+    if (horaFin > '18:00') {
+      setError('La cita debe terminar antes de las 18:00.');
       return;
     }
     setError('');
@@ -487,13 +502,17 @@ function ReprogramModal({
   return (
     <FormModal open={open} title="Reprogramar cita" submitLabel="Guardar" onClose={onClose} onSubmit={submit}>
       <DateInput value={fecha} onChange={setFecha} />
-      <HourPills label="Hora de inicio" value={horaInicio} onChange={setHoraInicio} />
       <HourPills
-        label="Hora de fin"
-        value={horaFin}
-        options={hourOptions.filter((hour) => hour > horaInicio)}
-        onChange={setHoraFin}
+        label="Hora de inicio"
+        options={validStartOptions}
+        value={horaInicio}
+        onChange={setHoraInicio}
       />
+      {horaFin ? (
+        <Text style={styles.cardText}>
+          Duracion: {duracion} min - {horaInicio} - {horaFin}
+        </Text>
+      ) : null}
       {error ? <Text style={styles.error}>{error}</Text> : null}
     </FormModal>
   );

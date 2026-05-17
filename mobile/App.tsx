@@ -41,7 +41,7 @@ export default function App() {
   const title = useMemo(() => {
     if (screen === 'role') return 'Bienvenido';
     if (screen === 'register') return 'Registrarse';
-    if (screen === 'login') return 'Iniciar Sesion';
+    if (screen === 'login') return 'Iniciar Sesión';
     return '';
   }, [screen]);
 

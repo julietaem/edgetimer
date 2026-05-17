@@ -68,7 +68,7 @@ export function AppShell({
         }}
       />
       <View style={styles.menuSpacer} />
-      <MenuButton icon={logoutIcon} label="Cerrar sesion" onPress={onLogout} />
+      <MenuButton icon={logoutIcon} label="Cerrar sesión" onPress={onLogout} />
     </View>
   );
 

@@ -272,7 +272,7 @@ function ClientHome({
               <Text style={styles.cardText}>
                 Inicio {slot.horaInicio}
               </Text>
-              <Pressable style={styles.smallButton} onPress={() => onReserve(slot)}>
+              <Pressable style={[styles.smallButton, styles.reserveButton]} onPress={() => onReserve(slot)}>
                 <Text style={styles.smallButtonText}>Reservar</Text>
               </Pressable>
             </View>
@@ -500,7 +500,7 @@ function SlotModal({
         onChange={(ids) => setHoraInicio(ids[0] || '')}
       />
       <Text style={styles.cardText}>
-        Se publicara como inicio disponible de 15 minutos. La duracion final se calcula cuando el cliente elige procedimientos.
+        Se publicará como inicio disponible de 15 minutos. La duracion final se calcula cuando el cliente elige procedimientos.
       </Text>
       {error ? <Text style={styles.error}>{error}</Text> : null}
     </FormModal>
@@ -848,6 +848,9 @@ const styles = StyleSheet.create({
     borderRadius: 8,
     paddingHorizontal: 14,
     paddingVertical: 9,
+  },
+  reserveButton: {
+    marginTop: 8,
   },
   smallButtonText: {
     color: colors.white,

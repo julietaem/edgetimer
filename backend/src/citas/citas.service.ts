@@ -326,8 +326,17 @@ export class CitasService {
     this.ensureOwner(ownerId, dto.profileId);
     this.ensureCanModify(cita.inicio_at);
 
+    const duration = await this.findCitaDuration(citaId);
     const inicioAt = this.toDate(dto.fecha, dto.horaInicio);
-    const finAt = this.toDate(dto.fecha, dto.horaFin);
+    const finAt = this.addMinutes(inicioAt, duration);
+    if (dto.horaFin) {
+      const requestedFinAt = this.toDate(dto.fecha, dto.horaFin);
+      if (requestedFinAt.getTime() !== finAt.getTime()) {
+        throw new BadRequestException(
+          'La hora de fin debe coincidir con la duracion de los procedimientos.',
+        );
+      }
+    }
     this.validateRange(inicioAt, finAt);
     this.validateBusinessHours(inicioAt, finAt);
 
@@ -530,6 +539,31 @@ export class CitasService {
     }
 
     return data as { id_procedimiento: string; duracion_minutos: number }[];
+  }
+
+  private async findCitaDuration(citaId: string) {
+    const { data, error } = await supabaseAdmin
+      .from('cita_procedimiento')
+      .select('procedimiento:procedimiento(duracion_minutos)')
+      .eq('id_cita', citaId);
+
+    if (error) {
+      throw new InternalServerErrorException(error.message);
+    }
+
+    const duration = (data || []).reduce((total: number, item: any) => {
+      const procedimiento = Array.isArray(item.procedimiento)
+        ? item.procedimiento[0]
+        : item.procedimiento;
+
+      return total + Number(procedimiento?.duracion_minutos || 0);
+    }, 0);
+
+    if (duration <= 0) {
+      throw new BadRequestException('La cita no tiene procedimientos validos.');
+    }
+
+    return duration;
   }
 
   private async findActiveCitasForSlots(barberoIds: string[]) {
